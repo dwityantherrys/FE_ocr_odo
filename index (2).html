@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Odometer Scanner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            background: white;
+            color: #667eea;
+        }
+
+        /* Camera View */
+        .camera-container {
+            position: relative;
+            width: 100vw;
+            height: calc(100vh - 60px);
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Scanning Overlay */
+        .scan-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .scan-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%;
+            max-width: 500px;
+            aspect-ratio: 16/9;
+            border: 3px solid rgba(102, 126, 234, 0.8);
+            border-radius: 12px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+            transition: border-color 0.3s;
+        }
+
+        .scan-frame.detecting {
+            border-color: #4ade80;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { border-color: #4ade80; }
+            50% { border-color: #22c55e; }
+        }
+
+        .scan-corners {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border: 4px solid #fff;
+        }
+
+        .corner-tl {
+            top: -3px;
+            left: -3px;
+            border-right: none;
+            border-bottom: none;
+            border-radius: 12px 0 0 0;
+        }
+
+        .corner-tr {
+            top: -3px;
+            right: -3px;
+            border-left: none;
+            border-bottom: none;
+            border-radius: 0 12px 0 0;
+        }
+
+        .corner-bl {
+            bottom: -3px;
+            left: -3px;
+            border-right: none;
+            border-top: none;
+            border-radius: 0 0 0 12px;
+        }
+
+        .corner-br {
+            bottom: -3px;
+            right: -3px;
+            border-left: none;
+            border-top: none;
+            border-radius: 0 0 12px 0;
+        }
+
+        /* Confidence Bar */
+        .confidence-bar {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 85%;
+            max-width: 500px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+        }
+
+        .confidence-label {
+            font-size: 14px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .confidence-progress {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #4ade80 100%);
+            transition: width 0.3s;
+            border-radius: 10px;
+        }
+
+        .status-text {
+            margin-top: 10px;
+            font-size: 13px;
+            text-align: center;
+            color: #fbbf24;
+        }
+
+        /* API Settings */
+        .api-settings {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            max-width: 300px;
+        }
+
+        .api-settings input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 6px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+
+        .api-settings label {
+            font-size: 12px;
+            color: #ccc;
+        }
+
+        .save-btn {
+            margin-top: 10px;
+            width: 100%;
+            padding: 8px;
+            background: #667eea;
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        /* Gallery View */
+        .gallery-container {
+            padding: 20px;
+            display: none;
+            min-height: calc(100vh - 60px);
+        }
+
+        .gallery-container.active {
+            display: block;
+        }
+
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .gallery-item {
+            background: #2a2a2a;
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .gallery-item:active {
+            transform: scale(0.95);
+        }
+
+        .gallery-item img {
+            width: 100%;
+            aspect-ratio: 16/9;
+            object-fit: cover;
+        }
+
+        .gallery-info {
+            padding: 10px;
+        }
+
+        .gallery-result {
+            font-size: 20px;
+            font-weight: bold;
+            color: #4ade80;
+            margin-bottom: 5px;
+        }
+
+        .gallery-time {
+            font-size: 11px;
+            color: #888;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            max-width: 90%;
+            max-height: 90%;
+            position: relative;
+        }
+
+        .modal-content img {
+            max-width: 100%;
+            max-height: 80vh;
+            border-radius: 10px;
+        }
+
+        .modal-result {
+            position: absolute;
+            bottom: -50px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 32px;
+            font-weight: bold;
+            color: #4ade80;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+
+        .close-modal {
+            position: absolute;
+            top: -40px;
+            right: 0;
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 20px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        canvas {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📷 Odometer Scanner</h1>
+        <div class="tab-buttons">
+            <button class="tab-btn active" data-tab="camera">Scan</button>
+            <button class="tab-btn" data-tab="gallery">Gallery</button>
+        </div>
+    </div>
+
+    <!-- Camera View -->
+    <div class="camera-container" id="cameraView">
+        <video id="video" autoplay playsinline></video>
+        
+        <div class="scan-overlay">
+            <div class="scan-frame" id="scanFrame">
+                <div class="scan-corners corner-tl"></div>
+                <div class="scan-corners corner-tr"></div>
+                <div class="scan-corners corner-bl"></div>
+                <div class="scan-corners corner-br"></div>
+            </div>
+        </div>
+
+        <div class="confidence-bar">
+            <div class="confidence-label">
+                <span>Confidence</span>
+                <span id="confidenceValue">0%</span>
+            </div>
+            <div class="confidence-progress">
+                <div class="confidence-fill" id="confidenceFill"></div>
+            </div>
+            <div class="status-text" id="statusText">Arahkan kamera ke odometer</div>
+        </div>
+
+        <div class="api-settings">
+            <label>Backend API URL</label>
+            <input type="text" id="apiUrl" placeholder="http://localhost:8000">
+            <button class="save-btn" onclick="saveApiUrl()">Simpan</button>
+        </div>
+    </div>
+
+    <!-- Gallery View -->
+    <div class="gallery-container" id="galleryView">
+        <h2>Hasil Tangkapan</h2>
+        <div class="gallery-grid" id="galleryGrid">
+            <div class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                </svg>
+                <p>Belum ada tangkapan.<br>Scan odometer untuk mulai.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <button class="close-modal" onclick="closeModal()">×</button>
+            <img id="modalImage" src="" alt="Result">
+            <div class="modal-result" id="modalResult"></div>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        let video, canvas, ctx;
+        let scanning = false;
+        let captureInterval;
+        let currentConfidence = 0;
+        let apiUrl = 'http://localhost:8000';
+        let consecutiveHighConf = 0;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            video = document.getElementById('video');
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+
+            // Load saved API URL
+            const saved = localStorage.getItem('apiUrl');
+            if (saved) {
+                apiUrl = saved;
+                document.getElementById('apiUrl').value = saved;
+            }
+
+            // Start camera
+            await startCamera();
+
+            // Load gallery
+            await loadGallery();
+
+            // Tab switching
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tab = btn.dataset.tab;
+                    switchTab(tab);
+                });
+            });
+        });
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'environment',
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    }
+                });
+                video.srcObject = stream;
+
+                video.addEventListener('loadedmetadata', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    startScanning();
+                });
+            } catch (err) {
+                console.error('Camera error:', err);
+                updateStatus('Error: Tidak dapat mengakses kamera', 0);
+            }
+        }
+
+        function startScanning() {
+            if (scanning) return;
+            scanning = true;
+
+            captureInterval = setInterval(async () => {
+                await captureAndAnalyze();
+            }, 300); // Capture every 300ms
+        }
+
+        async function captureAndAnalyze() {
+            if (!video.videoWidth) return;
+
+            // Draw video frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Convert to blob
+            canvas.toBlob(async (blob) => {
+                if (!blob) return;
+
+                const formData = new FormData();
+                formData.append('file', blob, 'frame.jpg');
+
+                try {
+                    const response = await fetch(`${apiUrl}/predict`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.status === 'OK') {
+                        const confidence = 100 - data.fraud_score;
+                        updateConfidence(confidence);
+                        updateStatus('✓ Odometer terdeteksi!', confidence);
+                        
+                        document.getElementById('scanFrame').classList.add('detecting');
+
+                        // Auto-capture at high confidence
+                        if (confidence >= 85) {
+                            consecutiveHighConf++;
+                            if (consecutiveHighConf >= 2) {
+                                await autoCapture(data, blob);
+                            }
+                        } else {
+                            consecutiveHighConf = 0;
+                        }
+                    } else {
+                        updateConfidence(30);
+                        updateStatus(data.errorMessage || 'Mencari odometer...', 30);
+                        document.getElementById('scanFrame').classList.remove('detecting');
+                        consecutiveHighConf = 0;
+                    }
+                } catch (err) {
+                    console.error('API error:', err);
+                    updateStatus('Error: Pastikan backend API berjalan', 0);
+                    updateConfidence(0);
+                }
+            }, 'image/jpeg', 0.8);
+        }
+
+        async function autoCapture(data, blob) {
+            // Stop scanning
+            clearInterval(captureInterval);
+            scanning = false;
+
+            // Flash effect
+            document.body.style.background = '#fff';
+            setTimeout(() => {
+                document.body.style.background = '#1a1a1a';
+            }, 100);
+
+            // Play shutter sound (optional)
+            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIFmm98OScTgwOUKzn77ZZFAg...');
+            audio.play().catch(() => {});
+
+            // Save to storage
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                const base64 = reader.result;
+                const capture = {
+                    id: Date.now(),
+                    result: data.result,
+                    image: base64,
+                    confidence: 100 - data.fraud_score,
+                    timestamp: new Date().toISOString()
+                };
+
+                try {
+                    const captures = await getCaptures();
+                    captures.push(capture);
+                    await window.storage.set('odometer-captures', JSON.stringify(captures));
+                    
+                    updateStatus('✓ Tersimpan! Tap Gallery untuk melihat', 100);
+                    
+                    // Resume scanning after 2 seconds
+                    setTimeout(() => {
+                        consecutiveHighConf = 0;
+                        startScanning();
+                    }, 2000);
+
+                    await loadGallery();
+                } catch (err) {
+                    console.error('Storage error:', err);
+                }
+            };
+            reader.readAsDataURL(blob);
+        }
+
+        async function getCaptures() {
+            try {
+                const result = await window.storage.get('odometer-captures');
+                return result ? JSON.parse(result.value) : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function updateConfidence(value) {
+            currentConfidence = value;
+            document.getElementById('confidenceValue').textContent = Math.round(value) + '%';
+            document.getElementById('confidenceFill').style.width = value + '%';
+        }
+
+        function updateStatus(message, confidence) {
+            const statusEl = document.getElementById('statusText');
+            statusEl.textContent = message;
+            
+            if (confidence >= 85) {
+                statusEl.style.color = '#4ade80';
+            } else if (confidence >= 50) {
+                statusEl.style.color = '#fbbf24';
+            } else {
+                statusEl.style.color = '#ef4444';
+            }
+        }
+
+        async function loadGallery() {
+            const captures = await getCaptures();
+            const grid = document.getElementById('galleryGrid');
+            
+            if (captures.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                        <p>Belum ada tangkapan.<br>Scan odometer untuk mulai.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = captures.reverse().map(c => `
+                <div class="gallery-item" onclick="openModal('${c.image}', '${c.result}')">
+                    <img src="${c.image}" alt="${c.result}">
+                    <div class="gallery-info">
+                        <div class="gallery-result">${c.result}</div>
+                        <div class="gallery-time">${new Date(c.timestamp).toLocaleString('id-ID')}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+
+            if (tab === 'camera') {
+                document.getElementById('cameraView').style.display = 'flex';
+                document.getElementById('galleryView').classList.remove('active');
+                if (!scanning) startScanning();
+            } else {
+                document.getElementById('cameraView').style.display = 'none';
+                document.getElementById('galleryView').classList.add('active');
+                if (scanning) {
+                    clearInterval(captureInterval);
+                    scanning = false;
+                }
+                loadGallery();
+            }
+        }
+
+        function saveApiUrl() {
+            const url = document.getElementById('apiUrl').value;
+            apiUrl = url;
+            localStorage.setItem('apiUrl', url);
+            alert('API URL tersimpan!');
+        }
+
+        function openModal(image, result) {
+            document.getElementById('modalImage').src = image;
+            document.getElementById('modalResult').textContent = result;
+            document.getElementById('modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.remove('active');
+        }
+    </script>
+</body>
+</html>
