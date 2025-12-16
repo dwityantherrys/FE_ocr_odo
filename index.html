@@ -425,6 +425,24 @@
     <canvas id="canvas"></canvas>
 
     <script>
+        // =========================
+        // CONFIGURATION (Match with Python backend)
+        // =========================
+        // Python fraud_score logic:
+        // - fraud_score: 10  = LOW_RISK  (90% confidence) → AUTO CAPTURE
+        // - fraud_score: 70  = HIGH_RISK (30% confidence) → NO_DIGIT_DETECTED
+        // - fraud_score: 75  = HIGH_RISK (25% confidence) → LOW_ODOMETER_CONFIDENCE  
+        // - fraud_score: 80  = HIGH_RISK (20% confidence) → NO_ODOMETER / INVALID_ROI
+        // - fraud_score: 90  = HIGH_RISK (10% confidence) → INVALID_IMAGE
+        
+        const CAPTURE_INTERVAL = 300;        // Capture every 300ms
+        const MIN_CONSECUTIVE_OK = 2;        // Need 2 consecutive OK frames
+        const AUTO_CAPTURE_FRAUD_SCORE = 10; // Auto capture when fraud_score <= 10
+        
+        // =========================
+        // GLOBAL VARIABLES
+        // =========================
+        
         let video, canvas, ctx;
         let scanning = false;
         let captureInterval;
@@ -488,7 +506,7 @@
 
             captureInterval = setInterval(async () => {
                 await captureAndAnalyze();
-            }, 300); // Capture every 300ms
+            }, CAPTURE_INTERVAL);
         }
 
         async function captureAndAnalyze() {
@@ -513,24 +531,30 @@
                     const data = await response.json();
                     
                     if (data.status === 'OK') {
+                        // Calculate confidence based on fraud_score
+                        // fraud_score: 10 = LOW_RISK = 90% confidence
                         const confidence = 100 - data.fraud_score;
                         updateConfidence(confidence);
-                        updateStatus('✓ Odometer terdeteksi!', confidence);
+                        updateStatus('✓ Odometer terdeteksi! Hasil: ' + data.result, confidence);
                         
                         document.getElementById('scanFrame').classList.add('detecting');
 
-                        // Auto-capture at high confidence
-                        if (confidence >= 85) {
+                        // Auto-capture when status OK and fraud_status is LOW_RISK
+                        // fraud_score <= 10 means very high confidence (≥90%)
+                        if (data.fraud_status === 'LOW_RISK' && data.fraud_score <= AUTO_CAPTURE_FRAUD_SCORE) {
                             consecutiveHighConf++;
-                            if (consecutiveHighConf >= 2) {
+                            if (consecutiveHighConf >= MIN_CONSECUTIVE_OK) {
+                                // Pass the image_url from backend
                                 await autoCapture(data, blob);
                             }
                         } else {
                             consecutiveHighConf = 0;
                         }
                     } else {
-                        updateConfidence(30);
-                        updateStatus(data.errorMessage || 'Mencari odometer...', 30);
+                        // REJECTED cases: fraud_score 70-90
+                        const confidence = Math.max(5, 100 - data.fraud_score);
+                        updateConfidence(confidence);
+                        updateStatus(data.errorMessage || 'Mencari odometer...', confidence);
                         document.getElementById('scanFrame').classList.remove('detecting');
                         consecutiveHighConf = 0;
                     }
@@ -561,11 +585,17 @@
             const reader = new FileReader();
             reader.onloadend = async () => {
                 const base64 = reader.result;
+                
+                // Prepare capture data matching Python output
                 const capture = {
                     id: Date.now(),
-                    result: data.result,
-                    image: base64,
+                    result: data.result,              // Odometer reading
+                    image: base64,                    // Local captured image
+                    image_url: data.image_url,        // Backend processed image URL
                     confidence: 100 - data.fraud_score,
+                    fraud_score: data.fraud_score,
+                    fraud_status: data.fraud_status,
+                    status: data.status,
                     timestamp: new Date().toISOString()
                 };
 
@@ -574,17 +604,24 @@
                     captures.push(capture);
                     await window.storage.set('odometer-captures', JSON.stringify(captures));
                     
-                    updateStatus('✓ Tersimpan! Tap Gallery untuk melihat', 100);
+                    updateStatus('✓ Tersimpan! Hasil: ' + data.result, 100);
                     
-                    // Resume scanning after 2 seconds
+                    // Resume scanning after 2.5 seconds
                     setTimeout(() => {
                         consecutiveHighConf = 0;
                         startScanning();
-                    }, 2000);
+                        updateStatus('Arahkan kamera ke odometer', 0);
+                    }, 2500);
 
                     await loadGallery();
                 } catch (err) {
                     console.error('Storage error:', err);
+                    updateStatus('Error menyimpan data', 0);
+                    // Resume scanning anyway
+                    setTimeout(() => {
+                        consecutiveHighConf = 0;
+                        startScanning();
+                    }, 2000);
                 }
             };
             reader.readAsDataURL(blob);
@@ -609,12 +646,15 @@
             const statusEl = document.getElementById('statusText');
             statusEl.textContent = message;
             
+            // Color based on Python's fraud_score logic:
+            // fraud_score 10 = LOW_RISK = green (90% confidence)
+            // fraud_score 70-90 = HIGH_RISK = red (10-30% confidence)
             if (confidence >= 85) {
-                statusEl.style.color = '#4ade80';
-            } else if (confidence >= 50) {
-                statusEl.style.color = '#fbbf24';
+                statusEl.style.color = '#4ade80';  // Green - LOW_RISK
+            } else if (confidence >= 40) {
+                statusEl.style.color = '#fbbf24';  // Yellow - Medium
             } else {
-                statusEl.style.color = '#ef4444';
+                statusEl.style.color = '#ef4444';  // Red - HIGH_RISK
             }
         }
 
